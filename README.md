@@ -295,7 +295,7 @@ config.data_residency = DataResidency.ANY   # Not recommended
 ## Development
 
 ```bash
-git clone https://github.com/your-org/vani
+git clone https://github.com/santhoshkumarampolu/vani
 cd vani
 pip install -e ".[dev]"
 
