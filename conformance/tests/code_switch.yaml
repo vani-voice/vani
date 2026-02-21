@@ -1,0 +1,269 @@
+# VAM/1.0 Conformance Tests — Code-Switch Annotation
+# Tests: CodeSwitchSpan correctness in TranscriptEvent
+
+suite: code_switch
+version: "1.0"
+description: >
+  Validates that a gateway correctly annotates code-switch spans
+  when code_switch_detection is enabled. Tests use known reference
+  audio transcripts with ground-truth span annotations.
+
+# Reference transcripts used across tests.
+# `text` is the expected final transcript.
+# `spans` are the ground-truth CodeSwitchSpan annotations.
+# Gateways must match spans within ±2 characters of ground truth.
+reference_transcripts:
+  hinglish_1:
+    language_hints:
+      [{ bcp47: "hi-IN", confidence: 0.7 }, { bcp47: "en-US", confidence: 0.3 }]
+    text: "मुझे ये laptop बहुत पसंद है"
+    primary_language: "hi-IN"
+    spans:
+      - start_char: 8
+        end_char: 14
+        language_bcp47: "en-US"
+
+  hinglish_2:
+    language_hints:
+      [{ bcp47: "hi-IN", confidence: 0.7 }, { bcp47: "en-US", confidence: 0.3 }]
+    text: "कल office में meeting है तो मैं late आऊंगा"
+    primary_language: "hi-IN"
+    spans:
+      - start_char: 4
+        end_char: 10
+        language_bcp47: "en-US"
+      - start_char: 14
+        end_char: 21
+        language_bcp47: "en-US"
+      - start_char: 32
+        end_char: 36
+        language_bcp47: "en-US"
+
+  tanglish_1:
+    language_hints:
+      [{ bcp47: "ta-IN", confidence: 0.7 }, { bcp47: "en-US", confidence: 0.3 }]
+    text: "நாளைக்கு meeting இருக்கு"
+    primary_language: "ta-IN"
+    spans:
+      - start_char: 9
+        end_char: 16
+        language_bcp47: "en-US"
+
+  pure_hindi:
+    language_hints: [{ bcp47: "hi-IN", confidence: 1.0 }]
+    text: "आज मौसम बहुत अच्छा है"
+    primary_language: "hi-IN"
+    spans: [] # No code-switching expected
+
+  pure_tamil:
+    language_hints: [{ bcp47: "ta-IN", confidence: 1.0 }]
+    text: "இன்று வானிலை நன்றாக இருக்கிறது"
+    primary_language: "ta-IN"
+    spans: []
+
+tests:
+  - id: CS-001
+    level: MUST
+    name: code_switch_spans field always present
+    description: >
+      When code_switch_detection is enabled, the final TranscriptEvent
+      MUST include the code_switch_spans field — even if it is an empty list.
+      The field MUST NOT be omitted.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: pure_hindi
+    assert:
+      - field: transcript_event.code_switch_spans
+        present: true # Field exists, even if empty list
+
+  - id: CS-002
+    level: MUST
+    name: Empty spans for pure Hindi utterance
+    description: >
+      A purely Hindi utterance with no English words MUST produce
+      an empty code_switch_spans list (not null, not missing).
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: pure_hindi
+    assert:
+      - field: transcript_event.code_switch_spans
+        equals: []
+
+  - id: CS-003
+    level: MUST
+    name: Unicode code-point offsets (not bytes)
+    description: >
+      Span start_char and end_char MUST be Unicode code-point offsets,
+      not UTF-8 byte offsets. For Devanagari text, each character is
+      3 bytes in UTF-8 but 1 code point. This test verifies the
+      character "l" in "laptop" is at position 8, not byte offset 22.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_1
+    assert:
+      - field: transcript_event.code_switch_spans[0].start_char
+        approximately: 8
+        tolerance: 2
+      - field: transcript_event.code_switch_spans[0].end_char
+        approximately: 14
+        tolerance: 2
+      - field: transcript_event.code_switch_spans[0].language_bcp47
+        equals: "en-US"
+
+  - id: CS-004
+    level: MUST
+    name: Multi-span Hinglish sentence
+    description: >
+      A sentence with multiple English words embedded in Hindi
+      MUST produce one CodeSwitchSpan per distinct switch segment.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_2
+    assert:
+      - field: transcript_event.code_switch_spans
+        length_at_least: 2 # "office", "meeting", "late" — at least 2 spans detected
+      - each_span:
+          field: language_bcp47
+          equals: "en-US"
+
+  - id: CS-005
+    level: MUST
+    name: Spans do not overlap
+    description: >
+      No two CodeSwitchSpans in the same TranscriptEvent MUST overlap.
+      start_char of span[n+1] MUST be >= end_char of span[n].
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_2
+    assert:
+      - rule: no_overlapping_spans
+        field: transcript_event.code_switch_spans
+
+  - id: CS-006
+    level: MUST
+    name: Tamil+English (Tanglish) code-switch detection
+    description: >
+      For ta-IN + en-US session, English words embedded in Tamil
+      MUST be annotated as code-switch spans.
+    skip_if: "gateway does not support ta-en code-switch profile"
+    session:
+      language_hints:
+        [
+          { bcp47: "ta-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: tanglish_1
+    assert:
+      - field: transcript_event.code_switch_spans
+        length_at_least: 1
+      - field: transcript_event.code_switch_spans[0].language_bcp47
+        equals: "en-US"
+
+  - id: CS-007
+    level: MUST
+    name: span.confidence is present and 0.0–1.0
+    description: >
+      Every CodeSwitchSpan MUST have a confidence value in [0.0, 1.0].
+      A value of 0.0 is acceptable when confidence is not available.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_1
+    assert:
+      - each_span:
+          field: confidence
+          range: [0.0, 1.0]
+
+  - id: CS-008
+    level: SHOULD
+    name: detected_language_bcp47 reflects dominant language
+    description: >
+      For a Hinglish utterance where Hindi is dominant, detected_language_bcp47
+      SHOULD be "hi-IN" (the dominant language), even if English words are present.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_1
+    assert:
+      - field: transcript_event.detected_language_bcp47
+        equals: "hi-IN"
+
+  - id: CS-009
+    level: SHOULD
+    name: code_switch_spans on partial transcripts
+    description: >
+      SHOULD also populate code_switch_spans on partial TranscriptEvents
+      (not only on final), to enable real-time UI highlighting.
+    session:
+      language_hints:
+        [
+          { bcp47: "hi-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    reference: hinglish_1
+    assert:
+      - event_type: TRANSCRIPT_TYPE_PARTIAL
+        field: code_switch_spans
+        present: true
+
+  - id: CS-010
+    level: MAY
+    name: Telugu+English (Tenglish) support
+    description: >
+      Gateway MAY support te-IN + en-US code-switch profile.
+    skip_if: "gateway does not support te-en code-switch profile"
+    session:
+      language_hints:
+        [
+          { bcp47: "te-IN", confidence: 0.7 },
+          { bcp47: "en-US", confidence: 0.3 },
+        ]
+      requested_capabilities:
+        code_switch_detection: true
+    assert:
+      - field: negotiated_capabilities.code_switch_detection
+        equals: true

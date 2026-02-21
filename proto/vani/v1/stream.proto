@@ -1,0 +1,304 @@
+// Vani Protocol — Bidirectional Agent Stream
+// VAM/1.0 — stream.proto
+//
+// Defines all messages exchanged over the persistent bidirectional gRPC stream
+// (VaniGateway.AgentStream) after a session has been established via session.proto.
+//
+// Message flow:
+//   Client → Gateway : AudioChunk  (voice input, continuous)
+//   Gateway → Client : TranscriptEvent (partial and final ASR results)
+//   Gateway → Client : TurnSignal (conversation state machine transitions)
+//   Client → Gateway : SynthesisRequest (optional: client-drives TTS text)
+//   Gateway → Client : SynthesisChunk (TTS audio output, streaming)
+//   Either direction : StreamError
+//
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Vani Protocol Authors
+
+syntax = "proto3";
+
+package vani.v1;
+
+option java_package = "io.vani.protocol.v1";
+option java_outer_classname = "StreamProto";
+option java_multiple_files = true;
+option go_package = "github.com/vani-protocol/vani/gen/go/vani/v1";
+
+import "google/protobuf/timestamp.proto";
+import "vani/v1/session.proto"; // for AudioCodec, ScriptPreference
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enumerations
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Voice Activity Detection signal accompanying each AudioChunk.
+// A conformant gateway MAY ignore VAD hints from the client and apply its own
+// server-side VAD, but it MUST surface its own VAD decisions via TurnSignal.
+enum VadSignal {
+  VAD_SIGNAL_UNSPECIFIED   = 0;
+  VAD_SIGNAL_VOICED        = 1; // Active speech detected in this chunk
+  VAD_SIGNAL_UNVOICED      = 2; // Silence / background noise
+  VAD_SIGNAL_END_OF_SPEECH = 3; // Definitive end of utterance (trailing silence threshold met)
+}
+
+// Whether a TranscriptEvent carries an intermediate (partial) hypothesis or a
+// finalized transcript segment. Clients MUST discard earlier partials for the
+// same utterance_id when a FINAL event arrives.
+enum TranscriptType {
+  TRANSCRIPT_TYPE_UNSPECIFIED = 0;
+  TRANSCRIPT_TYPE_PARTIAL     = 1; // Hypothesis may still change
+  TRANSCRIPT_TYPE_FINAL       = 2; // Transcript for this utterance is committed
+}
+
+// Conversation turn state machine. The gateway MUST emit TurnSignal events
+// at every state transition. Clients use these to drive UI affordances
+// (e.g., mic icon, thinking spinner, speaker waveform).
+//
+// Valid transitions:
+//   IDLE → LISTENING (user starts speaking or session opens)
+//   LISTENING → THINKING (end_of_speech VAD trigger / barge-in from client)
+//   THINKING → SPEAKING (first TTS chunk is ready)
+//   SPEAKING → LISTENING (TTS stream complete; mic re-opens)
+//   SPEAKING → INTERRUPTED (barge-in detected mid-TTS)
+//   INTERRUPTED → LISTENING
+//   Any state → ERROR (unrecoverable error in pipeline stage)
+//   Any state → END_OF_TURN (session-level end; triggers SessionEndNotice)
+enum TurnEvent {
+  TURN_EVENT_UNSPECIFIED = 0;
+  TURN_EVENT_IDLE        = 1; // Session open, no audio yet
+  TURN_EVENT_LISTENING   = 2; // Gateway is buffering and transcribing audio
+  TURN_EVENT_THINKING    = 3; // LLM is generating a response
+  TURN_EVENT_SPEAKING    = 4; // TTS synthesis is being streamed to client
+  TURN_EVENT_INTERRUPTED = 5; // Client spoke during TTS → barge-in detected
+  TURN_EVENT_END_OF_TURN = 6; // Conversation turn complete; agent ready for next turn
+  TURN_EVENT_ERROR       = 7; // Pipeline error (see StreamError for details)
+}
+
+// Error codes surfaced in StreamError.
+enum StreamErrorCode {
+  STREAM_ERROR_CODE_UNSPECIFIED          = 0;
+  STREAM_ERROR_CODE_ASR_BACKEND_TIMEOUT  = 1;
+  STREAM_ERROR_CODE_ASR_BACKEND_ERROR    = 2;
+  STREAM_ERROR_CODE_LLM_BACKEND_TIMEOUT  = 3;
+  STREAM_ERROR_CODE_LLM_BACKEND_ERROR    = 4;
+  STREAM_ERROR_CODE_TTS_BACKEND_TIMEOUT  = 5;
+  STREAM_ERROR_CODE_TTS_BACKEND_ERROR    = 6;
+  STREAM_ERROR_CODE_AUDIO_CORRUPT        = 7; // Undecodable audio received
+  STREAM_ERROR_CODE_UNSUPPORTED_LANGUAGE = 8; // Mid-stream language switch to unsupported lang
+  STREAM_ERROR_CODE_RATE_LIMITED         = 9;
+  STREAM_ERROR_CODE_SESSION_EXPIRED      = 10;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client → Gateway messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A single audio chunk sent from client to gateway.
+// Must be formatted according to the AudioProfile negotiated in SessionInitResponse.
+// Chunks SHOULD be 20–60ms of audio (320–960 bytes at PCM 16kHz 16-bit mono).
+// Smaller chunks reduce latency; larger chunks reduce gRPC overhead.
+message AudioChunk {
+  // Session identifier (echoed from SessionInitRequest).
+  string session_id = 1;
+
+  // Monotonically increasing sequence number. Used to detect packet loss.
+  uint64 sequence_number = 2;
+
+  // Raw audio bytes in the negotiated codec format.
+  bytes  audio_bytes = 3;
+
+  // Codec used for this chunk. Must match negotiated_audio_profile or trigger
+  // StreamError(AUDIO_CORRUPT).
+  AudioCodec codec = 4;
+
+  // Client-side VAD hint. OPTIONAL: gateways with server-side VAD may ignore.
+  VadSignal vad_hint = 5;
+
+  // Offset in milliseconds from session start. Used for transcript timestamps.
+  uint64 offset_ms = 6;
+
+  // Wall-clock time when the chunk was captured (client-side).
+  google.protobuf.Timestamp captured_at = 7;
+}
+
+// Optional: client-driven TTS request. Used when the agent logic runs on the
+// client side and the gateway serves purely as STT↔TTS infrastructure.
+// In the more common server-agentic mode, SynthesisRequests are issued
+// internally by the gateway after the LLM produces a response.
+message SynthesisRequest {
+  string session_id  = 1;
+  string request_id  = 2; // Unique ID for this synthesis; echoed in SynthesisChunk.
+  string text        = 3; // Text to synthesize (native script or Roman, per ScriptPreference)
+  string language_bcp47 = 4; // e.g. "hi-IN"
+  string voice_id    = 5; // Backend-specific voice identifier (e.g. "meera" for Sarvam Bulbul)
+  float  speaking_rate = 6; // 0.5–2.0; 1.0 = normal
+  float  pitch        = 7; // -20.0–20.0 semitones; 0.0 = default
+  AudioCodec output_codec = 8; // Desired codec for synthesized audio
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Code-switch annotation — the core Indian language differentiator
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A span within the transcript where the speaker switched languages.
+// Positions are Unicode character offsets (not bytes) into the `text` field of
+// TranscriptEvent.
+//
+// Example — Hinglish sentence: "मुझे ये laptop बहुत पसंद है"
+//   Span { start: 8, end: 14, language_bcp47: "en-US", confidence: 0.97 }
+//   (the word "laptop" is an English code-switch within a Hindi sentence)
+//
+// A sentence with no code-switching has an empty code_switch_spans list.
+// See spec/VAM-CodeSwitch.md for the full annotation specification.
+message CodeSwitchSpan {
+  uint32 start_char    = 1; // Inclusive start character offset
+  uint32 end_char      = 2; // Exclusive end character offset
+  string language_bcp47 = 3; // BCP-47 code of the switched-to language
+  float  confidence    = 4; // Model confidence 0.0–1.0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gateway → Client messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ASR transcript event. Emitted after each recognized utterance segment.
+// Partial events stream continuously during speech; the final event is emitted
+// after end-of-speech detection.
+//
+// The `text` field always contains the primary script (per ScriptPreference).
+// If ScriptPreference = SCRIPT_BOTH, `text_roman` is also populated.
+message TranscriptEvent {
+  string session_id    = 1;
+
+  // Unique identifier for this utterance. All partials and the one final event
+  // for the same spoken segment share the same utterance_id.
+  string utterance_id  = 2;
+
+  TranscriptType type  = 3;
+
+  // Transcribed text in the negotiated script (native or Roman).
+  string text          = 4;
+
+  // Roman transliteration of the text.
+  // Populated only when ScriptPreference = SCRIPT_ROMAN or SCRIPT_BOTH.
+  // Example: "मुझे अच्छा लगता है" → "mujhe achha lagta hai"
+  string text_roman    = 5;
+
+  // Detected language of this utterance/segment.
+  string detected_language_bcp47 = 6;
+
+  // Detected script name (informational: "Devanagari", "Tamil", etc.).
+  string detected_script = 7;
+
+  // ASR confidence score for the full utterance. 0.0–1.0.
+  float confidence = 8;
+
+  // Code-switch spans within this transcript segment.
+  // Empty if no language switching was detected.
+  // See CodeSwitchSpan for annotation semantics.
+  repeated CodeSwitchSpan code_switch_spans = 9;
+
+  // Dialect tag detected by the ASR model.
+  // Examples: "hi-Braj", "ta-Madurai", "te-Coastal"
+  // Empty if dialect routing is not enabled or model did not detect a dialect.
+  string dialect_tag = 10;
+
+  // Audio timestamp range this transcript covers, relative to session start.
+  uint64 start_offset_ms = 11;
+  uint64 end_offset_ms   = 12;
+
+  // Word-level timestamps. Only populated when the backend supports it and
+  // the session capability `speaker_diarization` is enabled.
+  repeated WordTiming word_timings = 13;
+
+  google.protobuf.Timestamp emitted_at = 14;
+}
+
+// Word-level timing information within a transcript.
+message WordTiming {
+  string word          = 1;
+  uint64 start_ms      = 2;
+  uint64 end_ms        = 3;
+  float  confidence    = 4;
+  string speaker_label = 5; // e.g. "SPEAKER_0", "SPEAKER_1" if diarization is on
+}
+
+// Conversation state machine event.
+// Clients MUST display appropriate UI state for each event.
+message TurnSignal {
+  string    session_id  = 1;
+  TurnEvent event       = 2;
+  string    turn_id     = 3; // Unique ID for this conversation turn
+  // Time elapsed in the current pipeline stage at the moment of this signal.
+  uint64    elapsed_ms  = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// Streaming TTS audio chunk. Multiple chunks are emitted per SynthesisRequest.
+// The final chunk in a synthesis is marked with is_final = true.
+message SynthesisChunk {
+  string session_id   = 1;
+  string request_id   = 2; // Echoes SynthesisRequest.request_id
+  uint64 chunk_index  = 3; // 0-based chunk sequence within this synthesis
+  bytes  audio_bytes  = 4; // PCM/Opus/AMR audio data
+  AudioCodec codec    = 5;
+  bool   is_final     = 6; // True on the last chunk for this request_id
+  uint64 duration_ms  = 7; // Duration of audio in this chunk
+  google.protobuf.Timestamp emitted_at = 8;
+}
+
+// Error event. May be emitted in place of or alongside normal stream events.
+// Non-fatal errors (e.g., a single chunk decoding failure) include
+// is_fatal = false; the stream continues. Fatal errors close the stream.
+message StreamError {
+  string          session_id = 1;
+  StreamErrorCode code       = 2;
+  string          message    = 3;
+  bool            is_fatal   = 4;
+  // Which pipeline stage failed: "asr", "llm", "tts", "vad", "action"
+  string          stage      = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Envelope — the top-level stream message (discriminated union)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ClientStreamMessage is the oneof wrapper for all client-to-gateway messages
+// sent over the bidirectional AgentStream RPC.
+message ClientStreamMessage {
+  oneof payload {
+    AudioChunk       audio_chunk        = 1;
+    SynthesisRequest synthesis_request  = 2;
+    // ActionResultEnvelope is imported from action.proto and routed here.
+    // Defined in action.proto to avoid circular imports.
+    bytes            action_result_payload = 3; // Serialized ActionResultEnvelope
+  }
+}
+
+// GatewayStreamMessage is the oneof wrapper for all gateway-to-client messages.
+message GatewayStreamMessage {
+  oneof payload {
+    TranscriptEvent  transcript_event  = 1;
+    TurnSignal       turn_signal       = 2;
+    SynthesisChunk   synthesis_chunk   = 3;
+    StreamError      stream_error      = 4;
+    // ActionRequestEnvelope is serialized from action.proto.
+    bytes            action_request_payload = 5; // Serialized ActionRequestEnvelope
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service definition
+// ─────────────────────────────────────────────────────────────────────────────
+
+// VaniStreamService provides the core bidirectional agent stream.
+// The client MUST have a confirmed session (from VaniSessionService.InitSession)
+// before calling AgentStream. The session_id in audio chunks is used to
+// authenticate and route to the correct pipeline.
+service VaniStreamService {
+  // The primary bidirectional streaming RPC.
+  // Client sends ClientStreamMessage (audio + optional synthesis requests).
+  // Gateway sends GatewayStreamMessage (transcripts, turn signals, TTS audio, errors).
+  rpc AgentStream(stream ClientStreamMessage) returns (stream GatewayStreamMessage);
+}

@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vani"
+version = "0.1.0-alpha"
+description = "Vani — Open-source Voice↔Text↔Action middleware protocol for Indian languages"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["indian-languages", "voice-agent", "nlp", "grpc", "hindi", "tamil", "vernacular", "bhashini", "sarvam", "ai4bharat"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Communications :: Telephony",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "grpcio>=1.62.0",
+    "grpcio-tools>=1.62.0",
+    "protobuf>=4.25.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.6.0",
+    "anyio>=4.3.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+sarvam = [
+    "httpx>=0.27.0",
+    "websockets>=12.0",
+]
+ai4bharat = [
+    "torch>=2.1.0",
+    "transformers>=4.38.0",
+    "soundfile>=0.12.1",
+]
+bhashini = [
+    "httpx>=0.27.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "types-protobuf>=4.25.0",
+    "pyyaml>=6.0.1",
+    "grpcio-testing>=1.62.0",
+]
+all = [
+    "vani[sarvam,ai4bharat,bhashini,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/vani-protocol/vani"
+Documentation = "https://vani-protocol.github.io/vani"
+Repository = "https://github.com/vani-protocol/vani"
+"Bug Tracker" = "https://github.com/vani-protocol/vani/issues"
+Changelog = "https://github.com/vani-protocol/vani/blob/main/CHANGELOG.md"
+
+[project.scripts]
+vani-gen = "vani.cli:generate_protos"
+vani-conformance = "vani.cli:run_conformance"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vani"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

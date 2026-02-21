@@ -1,0 +1,199 @@
+# VAM/1.0 Conformance Tests — Session Negotiation
+# Tests: SessionInitRequest → SessionInitResponse protocol
+
+suite: session_negotiation
+version: "1.0"
+description: >
+  Validates that a gateway correctly handles session initialization,
+  codec negotiation, capability declaration, and rejection scenarios.
+
+tests:
+  - id: SN-001
+    level: MUST
+    name: Basic Hindi session establishment
+    description: >
+      A gateway MUST accept a minimal SessionInitRequest for hi-IN
+      and return SESSION_STATUS_OK with a valid session_id echo.
+    request:
+      session_id: "test-sn-001-{{uuid}}"
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 1.0
+      audio_profile:
+        codec: PCM_16K_16
+        sample_rate: 16000
+        channels: 1
+      data_residency: INDIA_ONLY
+    assert:
+      - field: status
+        equals: SESSION_STATUS_OK
+      - field: session_id
+        equals: "test-sn-001-{{uuid}}" # Must echo client session_id
+      - field: primary_language_bcp47
+        equals: "hi-IN"
+      - field: negotiated_audio_profile.codec
+        equals: PCM_16K_16
+
+  - id: SN-002
+    level: MUST
+    name: Tier 1 language support — all five languages
+    description: >
+      A conformant gateway MUST support hi-IN, ta-IN, te-IN, bn-IN, mr-IN.
+    for_each_language:
+      - bcp47: "hi-IN"
+        expected_status: SESSION_STATUS_OK
+      - bcp47: "ta-IN"
+        expected_status: SESSION_STATUS_OK
+      - bcp47: "te-IN"
+        expected_status: SESSION_STATUS_OK
+      - bcp47: "bn-IN"
+        expected_status: SESSION_STATUS_OK
+      - bcp47: "mr-IN"
+        expected_status: SESSION_STATUS_OK
+    request_template:
+      language_hints:
+        - bcp47_code: "{{bcp47}}"
+          confidence: 1.0
+    assert:
+      - field: status
+        equals: "{{expected_status}}"
+
+  - id: SN-003
+    level: MUST
+    name: session_id echo — MUST match client value
+    description: >
+      The gateway MUST echo the client-provided session_id unchanged.
+    request:
+      session_id: "conformance-echo-test-12345"
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 1.0
+    assert:
+      - field: session_id
+        equals: "conformance-echo-test-12345"
+
+  - id: SN-004
+    level: MUST
+    name: Codec downgrade — PCM not supported → Opus
+    description: >
+      If the gateway does not support PCM_16K_16 but supports OPUS_16K,
+      it MUST downgrade and set negotiated_audio_profile.codec = OPUS_16K.
+      It MUST also list "audio_codec_downgraded_to_opus" in degraded_capabilities.
+    request:
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 1.0
+      audio_profile:
+        codec: PCM_16K_16
+    gateway_config:
+      supported_codecs: [OPUS_16K, AMR_NB_8K] # PCM not available
+    assert:
+      - field: status
+        in: [SESSION_STATUS_OK, SESSION_STATUS_DEGRADED]
+      - field: negotiated_audio_profile.codec
+        not_equals: PCM_16K_16
+      - field: degraded_capabilities
+        contains: "audio_codec_downgraded_to_opus"
+
+  - id: SN-005
+    level: MUST
+    name: Unsupported language → SESSION_STATUS_LANGUAGE_UNSUPPORTED
+    description: >
+      If the gateway cannot serve any of the requested languages,
+      it MUST return SESSION_STATUS_LANGUAGE_UNSUPPORTED.
+    request:
+      language_hints:
+        - bcp47_code: "ja-JP"
+          confidence: 1.0
+        - bcp47_code: "ko-KR"
+          confidence: 1.0
+      # Neither Japanese nor Korean are Indian languages — no valid backend
+    assert:
+      - field: status
+        equals: SESSION_STATUS_LANGUAGE_UNSUPPORTED
+
+  - id: SN-006
+    level: MUST
+    name: Code-switch capability acknowledgment
+    description: >
+      If the gateway supports code-switch detection for the requested profile,
+      negotiated_capabilities.code_switch_detection MUST be true.
+      If it does NOT support it, the field MUST be false (not omitted).
+    request:
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 0.7
+        - bcp47_code: "en-US"
+          confidence: 0.3
+      requested_capabilities:
+        code_switch_detection: true
+    assert:
+      - field: negotiated_capabilities.code_switch_detection
+        is_boolean: true
+        # value may be true or false; the key test is that it is NOT omitted
+
+  - id: SN-007
+    level: MUST
+    name: Hinglish code-switch profile — hi-IN + en-US
+    description: >
+      Gateway supporting the hi-en code-switch profile MUST set
+      code_switch_detection = true and include "hi-IN" in supported_languages.
+    request:
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 0.7
+        - bcp47_code: "en-US"
+          confidence: 0.3
+      requested_capabilities:
+        code_switch_detection: true
+    skip_if: "negotiated_capabilities.code_switch_detection == false"
+    assert:
+      - field: negotiated_capabilities.code_switch_detection
+        equals: true
+      - field: supported_languages_bcp47
+        contains: "hi-IN"
+
+  - id: SN-008
+    level: MUST
+    name: DATA_RESIDENCY_INDIA_ONLY is the default
+    description: >
+      If the client omits data_residency, the gateway MUST default to
+      DATA_RESIDENCY_INDIA_ONLY behavior (no audio routed outside India).
+    request:
+      language_hints:
+        - bcp47_code: "hi-IN"
+          confidence: 1.0
+      # data_residency intentionally omitted
+    assert:
+      - field: status
+        equals: SESSION_STATUS_OK
+      # Verification of actual residency enforcement is out-of-band
+      # but the session MUST be accepted without error
+
+  - id: SN-009
+    level: SHOULD
+    name: session_ttl_seconds is populated
+    description: >
+      A gateway SHOULD set session_ttl_seconds to indicate how long the
+      session remains valid. Clients MUST re-initialize after TTL expiry.
+    request:
+      language_hints:
+        - bcp47_code: "ta-IN"
+          confidence: 1.0
+    assert:
+      - field: session_ttl_seconds
+        greater_than: 0
+
+  - id: SN-010
+    level: SHOULD
+    name: resolved_backends is populated
+    description: >
+      The gateway SHOULD populate resolved_backends.asr/llm/tts with
+      the backend selected for this session.
+    request:
+      language_hints:
+        - bcp47_code: "te-IN"
+          confidence: 1.0
+    assert:
+      - field: resolved_backends
+        not_null: true

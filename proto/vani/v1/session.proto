@@ -1,0 +1,274 @@
+// Vani Protocol — Session Negotiation
+// VAM/1.0 — session.proto
+//
+// Defines the session handshake between a Vani Client and a Vani Gateway.
+// A session MUST be established before any audio or action stream is opened.
+//
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Vani Protocol Authors
+
+syntax = "proto3";
+
+package vani.v1;
+
+option java_package = "io.vani.protocol.v1";
+option java_outer_classname = "SessionProto";
+option java_multiple_files = true;
+option go_package = "github.com/vani-protocol/vani/gen/go/vani/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enumerations
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The Indian language tier. Tier 1 covers ~65% of India's population and all
+// have production-quality STT/TTS models (Sarvam Saaras v3, IndicWhisper).
+// Tier 2 adds the next five major languages. Tier 3 covers the remaining
+// scheduled languages, many of which are low-resource or in research stage.
+enum LanguageTier {
+  LANGUAGE_TIER_UNSPECIFIED = 0;
+  LANGUAGE_TIER_1 = 1; // hi-IN, ta-IN, te-IN, bn-IN, mr-IN
+  LANGUAGE_TIER_2 = 2; // kn-IN, ml-IN, gu-IN, pa-IN, or-IN
+  LANGUAGE_TIER_3 = 3; // as-IN, ur-IN, mai-IN, kok-IN, sat-IN, etc.
+}
+
+// Script in which the ASR transcript is expected to be returned.
+// ROMAN_TRANSLITERATION is useful for callers that receive Romanized Indic
+// text (e.g., "aap kaise hain") and need to feed it to an English-first LLM.
+enum ScriptPreference {
+  SCRIPT_PREFERENCE_UNSPECIFIED = 0;
+  SCRIPT_NATIVE    = 1; // Return transcript in the native script (Devanagari, Tamil, etc.)
+  SCRIPT_ROMAN     = 2; // Return transliterated Roman script only
+  SCRIPT_BOTH      = 3; // Return both; native in `text`, Roman in `text_roman`
+}
+
+// Audio codec profile. Used for bandwidth-adaptive transport tier selection.
+// Tier A = 2G/EDGE, Tier B = 3G, Tier C = 4G+/LAN.
+// See spec/VAM-Transport.md for the full bandwidth negotiation algorithm.
+enum AudioCodec {
+  AUDIO_CODEC_UNSPECIFIED = 0;
+  AUDIO_CODEC_AMR_NB_8K   = 1; // Tier A: AMR-NB, 8 kHz, 12.2 kbps — telephony 2G
+  AUDIO_CODEC_OPUS_16K    = 2; // Tier B: Opus, 16 kHz, ~32 kbps — 3G / WebSocket
+  AUDIO_CODEC_PCM_16K_16  = 3; // Tier C: PCM signed 16-bit, 16 kHz — 4G / gRPC
+  AUDIO_CODEC_PCM_8K_16   = 4; // Tier A fallback: PCM signed 16-bit, 8 kHz — PSTN/SIP
+}
+
+// Model backend provider for a given pipeline stage.
+// A conformant gateway MUST support at least one non-CUSTOM backend.
+// The client supplies an ordered preference list; the gateway uses the first
+// backend it can serve. Example: [SARVAM, AI4BHARAT, BHASHINI].
+enum ModelBackend {
+  MODEL_BACKEND_UNSPECIFIED = 0;
+  MODEL_BACKEND_SARVAM      = 1; // Sarvam AI (Saaras v3 STT, Bulbul TTS, Sarvam-M LLM)
+  MODEL_BACKEND_AI4BHARAT   = 2; // AI4Bharat (IndicWhisper STT, AI4BTTS, Airavata LLM)
+  MODEL_BACKEND_BHASHINI    = 3; // MeitY Bhashini / ULCA pipeline API
+  MODEL_BACKEND_AZURE       = 4; // Azure Cognitive Services (partial Indian language coverage)
+  MODEL_BACKEND_GOOGLE      = 5; // Google Cloud Speech / Chirp
+  MODEL_BACKEND_CUSTOM      = 6; // Third-party or self-hosted — details in custom_backend_uri
+}
+
+// Data residency constraint for the session.
+// Gateways MUST enforce this; routing audio to a non-conformant region is a
+// protocol violation and MUST trigger SessionError with code DATA_RESIDENCY_VIOLATION.
+// Relevant to DPDP Act 2023 (India's data protection law).
+enum DataResidency {
+  DATA_RESIDENCY_UNSPECIFIED = 0;
+  DATA_RESIDENCY_INDIA_ONLY  = 1; // All audio and transcript data must stay within India
+  DATA_RESIDENCY_ANY         = 2; // No geographic constraint
+  DATA_RESIDENCY_ON_PREM     = 3; // Air-gapped: no outbound network calls permitted
+}
+
+// Session status codes returned in SessionInitResponse.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED    = 0;
+  SESSION_STATUS_OK             = 1; // Session established successfully
+  SESSION_STATUS_DEGRADED       = 2; // Established but some capabilities were downgraded
+  SESSION_STATUS_REJECTED       = 3; // Gateway cannot satisfy the minimum requirements
+  SESSION_STATUS_LANGUAGE_UNSUPPORTED = 4; // None of the requested languages are available
+  SESSION_STATUS_CODEC_UNSUPPORTED    = 5; // Requested codec is not available on this gateway
+  SESSION_STATUS_DATA_RESIDENCY_VIOLATION = 6;
+  SESSION_STATUS_RATE_LIMITED   = 7;
+  SESSION_STATUS_AUTH_FAILED    = 8;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A single language hint with an optional confidence weight.
+// BCP-47 codes for Tier 1: "hi-IN", "ta-IN", "te-IN", "bn-IN", "mr-IN".
+// For code-switching, supply multiple hints (e.g. hi-IN + en-US for Hinglish).
+// If no hints are supplied, the gateway MUST attempt auto-detection.
+message LanguageHint {
+  string bcp47_code = 1;   // e.g. "hi-IN", "ta-IN", "te-IN", "bn-IN", "mr-IN"
+  float  confidence = 2;   // 0.0–1.0; 0.0 = unknown (equal weight with others)
+}
+
+// Audio profile for the session. Negotiated once at session init.
+// The gateway may downgrade the codec if the client-requested codec is not
+// available; the accepted codec is returned in SessionInitResponse.
+message AudioProfile {
+  AudioCodec codec        = 1;
+  uint32     sample_rate  = 2; // Hz — informational; must match codec spec
+  uint32     channels     = 3; // 1 = mono (required for STT); 2 = stereo (optional)
+  uint32     bitrate_kbps = 4; // For Opus; ignored for PCM/AMR
+}
+
+// Ordered list of model backend preferences for a specific pipeline stage.
+// The gateway uses the first backend it can serve for this session.
+// custom_backend_uri is only inspected when MODEL_BACKEND_CUSTOM is in the list.
+message ModelPreference {
+  repeated ModelBackend backends          = 1; // Priority-ordered list
+  string                custom_backend_uri = 2; // gRPC endpoint for CUSTOM backend
+}
+
+// Aggregated model preferences across all pipeline stages.
+// Any stage left unset falls back to gateway default priority.
+message ModelPreferences {
+  ModelPreference asr = 1; // Automatic Speech Recognition
+  ModelPreference llm = 2; // Large Language Model / dialogue
+  ModelPreference tts = 3; // Text-to-Speech synthesis
+  ModelPreference nmt = 4; // Neural Machine Translation (optional inter-language relay)
+}
+
+// Feature flags that the client may request.
+// A gateway that does not support a flag MUST return the flag as false in
+// SessionInitResponse.negotiated_capabilities — it MUST NOT silently skip it.
+message SessionCapabilities {
+  bool code_switch_detection  = 1; // Detect and annotate language switches in transcript
+  bool dialect_routing        = 2; // Automatically route to dialect-specialized ASR model
+  bool speaker_diarization    = 3; // Multi-speaker labeling (useful for call center audio)
+  bool action_execution       = 4; // Enable the Action channel (action.proto)
+  bool transliteration_output = 5; // Include Roman transliteration in TranscriptEvent
+  bool continuous_vad         = 6; // Gateway-side Voice Activity Detection in stream
+  bool noise_suppression      = 7; // Denoiser preprocessing (Bhashini denoiser model)
+  bool streaming_tts          = 8; // Enable chunked TTS audio responses
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Init RPC messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Sent by the client to open a new Vani session.
+// The gateway responds with SessionInitResponse before the bidirectional
+// stream (VaniGateway.AgentStream) is accepted.
+message SessionInitRequest {
+  // Unique session identifier generated by the client.
+  // Format: UUID v4. Used for logging and conformance tracing.
+  string session_id = 1;
+
+  // Application / caller identifier. Opaque string for gateway-side logging.
+  string caller_id  = 2;
+
+  // Ordered list of language hints for this call.
+  // For Hinglish: [{ bcp47: "hi-IN", confidence: 0.7 }, { bcp47: "en-US", confidence: 0.3 }]
+  // Empty = request full auto-detection.
+  repeated LanguageHint language_hints = 3;
+
+  // Script preference for transcript output.
+  ScriptPreference script_preference = 4;
+
+  // Audio codec and format the client will send (and expects to receive for TTS).
+  AudioProfile audio_profile = 5;
+
+  // Model backend preferences per pipeline stage.
+  ModelPreferences model_preferences = 6;
+
+  // Data residency constraint. Default = DATA_RESIDENCY_INDIA_ONLY.
+  DataResidency data_residency = 7;
+
+  // Requested optional capabilities.
+  SessionCapabilities requested_capabilities = 8;
+
+  // Bearer token or API key. Transport-layer auth (TLS + mTLS) is primary;
+  // this field supplements application-level API key auth.
+  string auth_token = 9;
+
+  // Arbitrary metadata (caller-set). Max 16 key-value pairs.
+  // Example: {"channel": "whatsapp", "use_case": "agritech"}
+  map<string, string> metadata = 10;
+
+  // ISO 8601 timestamp from the client at time of request.
+  google.protobuf.Timestamp client_timestamp = 11;
+}
+
+// Returned by the gateway acknowledging or rejecting session establishment.
+message SessionInitResponse {
+  // Echo of the client-provided session_id.
+  string session_id = 1;
+
+  // Overall session status.
+  SessionStatus status = 2;
+
+  // Human-readable status detail (English). For logs, never shown to end users.
+  string status_message = 3;
+
+  // The codec the gateway accepted (may differ from requested if downgraded).
+  AudioProfile negotiated_audio_profile = 4;
+
+  // The capabilities the gateway will actually provide.
+  // Any flag that was requested but not supported MUST be false here.
+  SessionCapabilities negotiated_capabilities = 5;
+
+  // The primary language the gateway will use for ASR and TTS in this session.
+  // Populated from the first resolvable hint, or the auto-detected language if
+  // hints were empty.
+  string primary_language_bcp47 = 6;
+
+  // List of languages the gateway confirmed it can handle for this session.
+  repeated string supported_languages_bcp47 = 7;
+
+  // Which backend was selected for each stage (informational).
+  ModelPreferences resolved_backends = 8;
+
+  // Gateway-assigned connection details for the streaming channel.
+  string stream_endpoint = 9;  // gRPC endpoint for VaniGateway.AgentStream
+
+  // Session expiry in seconds from now. Client must re-init after expiry.
+  uint32 session_ttl_seconds = 10;
+
+  // Gateway wall-clock time at response.
+  google.protobuf.Timestamp gateway_timestamp = 11;
+
+  // If status = SESSION_STATUS_DEGRADED, lists which capabilities were dropped.
+  repeated string degraded_capabilities = 12;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Termination
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SessionEndReason {
+  SESSION_END_REASON_UNSPECIFIED  = 0;
+  SESSION_END_REASON_CLIENT_HUNG_UP = 1;
+  SESSION_END_REASON_TIMEOUT       = 2;
+  SESSION_END_REASON_PROTOCOL_ERROR = 3;
+  SESSION_END_REASON_BACKEND_ERROR  = 4;
+  SESSION_END_REASON_RATE_LIMITED   = 5;
+  SESSION_END_REASON_POLICY_VIOLATION = 6;
+}
+
+message SessionEndNotice {
+  string            session_id = 1;
+  SessionEndReason  reason     = 2;
+  string            message    = 3;
+  // Total audio processed (seconds) — for billing / usage tracking.
+  float             audio_seconds_processed = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service definition
+// ─────────────────────────────────────────────────────────────────────────────
+
+// VaniSessionService handles pre-stream session lifecycle.
+// A client MUST call InitSession before opening an AgentStream.
+service VaniSessionService {
+  // Negotiate a new agent session. Returns synchronously before any audio
+  // is exchanged.
+  rpc InitSession(SessionInitRequest) returns (SessionInitResponse);
+
+  // Gracefully terminate a session and flush any pending transcripts/actions.
+  rpc EndSession(SessionEndNotice) returns (SessionEndNotice);
+}

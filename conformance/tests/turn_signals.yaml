@@ -1,0 +1,177 @@
+# VAM/1.0 Conformance Tests — TurnSignal State Machine
+# Tests: Turn state ordering and valid transitions
+
+suite: turn_signals
+version: "1.0"
+description: >
+  Validates that gateway TurnSignal events follow the defined state machine.
+  Invalid transitions are protocol violations.
+
+# Valid transition graph:
+#   IDLE → LISTENING
+#   LISTENING → THINKING
+#   THINKING → SPEAKING
+#   SPEAKING → LISTENING (TTS complete, mic reopens)
+#   SPEAKING → INTERRUPTED (barge-in detected)
+#   INTERRUPTED → LISTENING
+#   Any → ERROR (unrecoverable pipeline failure)
+#   Any → END_OF_TURN (session-level termination)
+
+tests:
+  - id: TS-001
+    level: MUST
+    name: First event after session open is LISTENING or IDLE
+    description: >
+      The first TurnSignal emitted after AgentStream opens MUST be
+      either TURN_EVENT_IDLE or TURN_EVENT_LISTENING.
+    scenario: open_stream_send_audio
+    assert:
+      - event: first_turn_signal
+        field: event
+        in: [TURN_EVENT_IDLE, TURN_EVENT_LISTENING]
+
+  - id: TS-002
+    level: MUST
+    name: THINKING follows LISTENING (end-of-speech detected)
+    description: >
+      After a final TranscriptEvent is emitted, the next TurnSignal
+      MUST be TURN_EVENT_THINKING.
+    scenario: full_utterance_turn
+    assert:
+      - event: turn_signal_after_final_transcript
+        field: event
+        equals: TURN_EVENT_THINKING
+
+  - id: TS-003
+    level: MUST
+    name: SPEAKING follows THINKING
+    description: >
+      When TTS synthesis begins (first SynthesisChunk is emitted),
+      a TURN_EVENT_SPEAKING signal MUST precede the first SynthesisChunk.
+    scenario: full_utterance_turn
+    assert:
+      - event: turn_signal_before_first_synthesis_chunk
+        field: event
+        equals: TURN_EVENT_SPEAKING
+
+  - id: TS-004
+    level: MUST
+    name: LISTENING follows SPEAKING after TTS complete
+    description: >
+      After the last SynthesisChunk (is_final=true) is emitted,
+      a TURN_EVENT_LISTENING or TURN_EVENT_END_OF_TURN MUST follow.
+    scenario: full_utterance_turn
+    assert:
+      - event: turn_signal_after_final_synthesis
+        field: event
+        in: [TURN_EVENT_LISTENING, TURN_EVENT_END_OF_TURN]
+
+  - id: TS-005
+    level: MUST
+    name: THINKING → SPEAKING direct transition (no LISTENING between them)
+    description: >
+      TURN_EVENT_LISTENING MUST NOT appear between THINKING and SPEAKING
+      within a single turn cycle. The sequence MUST be:
+      LISTENING → THINKING → SPEAKING.
+    scenario: full_utterance_turn
+    assert:
+      - sequence:
+          not_interleaved:
+            - TURN_EVENT_THINKING
+            - TURN_EVENT_LISTENING
+            - TURN_EVENT_SPEAKING
+          within: "single_turn"
+
+  - id: TS-006
+    level: MUST
+    name: turn_id is consistent within a single turn
+    description: >
+      All TurnSignal events within one conversation turn MUST share the
+      same turn_id. The turn_id MUST change after END_OF_TURN.
+    scenario: two_consecutive_turns
+    assert:
+      - rule: consistent_turn_id_within_turn
+      - rule: turn_id_changes_after_end_of_turn
+
+  - id: TS-007
+    level: MUST
+    name: ERROR signal on STT backend failure
+    description: >
+      If the STT backend returns an error, the gateway MUST emit
+      TURN_EVENT_ERROR (not silently stay in THINKING state).
+    scenario: stt_backend_timeout
+    assert:
+      - event: turn_signal_on_error
+        field: event
+        equals: TURN_EVENT_ERROR
+
+  - id: TS-008
+    level: MUST
+    name: INTERRUPTED signal on barge-in during TTS
+    description: >
+      If an AudioChunk with VAD_SIGNAL_VOICED is received while the gateway
+      is in TURN_EVENT_SPEAKING state, the gateway MUST emit
+      TURN_EVENT_INTERRUPTED within 150ms.
+    scenario: barge_in_during_tts
+    skip_if: "gateway.streaming_tts is false"
+    assert:
+      - event: turn_signal_on_barge_in
+        field: event
+        equals: TURN_EVENT_INTERRUPTED
+      - timing:
+          within_ms: 150
+
+  - id: TS-009
+    level: MUST
+    name: INTERRUPTED → LISTENING (not THINKING)
+    description: >
+      After INTERRUPTED, the gateway MUST return to LISTENING state
+      (ready to receive the user's new utterance). Going to THINKING
+      after interrupt before receiving audio is a protocol violation.
+    scenario: barge_in_during_tts
+    skip_if: "gateway.streaming_tts is false"
+    assert:
+      - event: turn_signal_after_interrupted
+        field: event
+        equals: TURN_EVENT_LISTENING
+
+  - id: TS-010
+    level: SHOULD
+    name: elapsed_ms is populated
+    description: >
+      TurnSignal.elapsed_ms SHOULD be populated with the time elapsed
+      in the current pipeline stage (useful for latency monitoring).
+    scenario: full_utterance_turn
+    assert:
+      - each_turn_signal:
+          field: elapsed_ms
+          greater_than_or_equal: 0
+
+  - id: TS-011
+    level: SHOULD
+    name: Latency target — THINKING → SPEAKING ≤ 500ms
+    description: >
+      For Tier C (4G) sessions, the time from TURN_EVENT_THINKING to
+      TURN_EVENT_SPEAKING SHOULD be ≤ 500ms. This includes LLM first-token
+      latency plus TTS first-chunk latency.
+    scenario: full_utterance_turn_tier_c
+    assert:
+      - timing:
+          from: TURN_EVENT_THINKING
+          to: TURN_EVENT_SPEAKING
+          max_ms: 500
+          level: SHOULD # Warning if exceeded, not failure
+
+  - id: TS-012
+    level: SHOULD
+    name: Latency target — end-to-end ≤ 700ms (Tier B)
+    description: >
+      For Tier B (3G) sessions, the time from final TranscriptEvent
+      to first SynthesisChunk SHOULD be ≤ 700ms.
+    scenario: full_utterance_turn_tier_b
+    assert:
+      - timing:
+          from: final_transcript_event
+          to: first_synthesis_chunk
+          max_ms: 700
+          level: SHOULD
