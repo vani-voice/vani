@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>वाणी · Vani — Voice Demo</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #242836;
+            --border: #2e3348;
+            --text: #e4e6f0;
+            --text-dim: #8b8fa8;
+            --accent: #6c63ff;
+            --accent-glow: rgba(108, 99, 255, 0.3);
+            --green: #4ade80;
+            --red: #f87171;
+            --orange: #fb923c;
+            --blue: #60a5fa;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            text-align: center;
+            padding: 2rem 1rem 1rem;
+            width: 100%;
+            max-width: 720px;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        header p {
+            color: var(--text-dim);
+            margin-top: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .config-bar {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem;
+            margin: 0.5rem 1rem;
+            width: 100%;
+            max-width: 720px;
+        }
+
+        .config-bar select {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .config-bar select:focus { border-color: var(--accent); }
+
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 12px;
+            background: var(--surface2);
+            color: var(--text-dim);
+            border: 1px solid var(--border);
+        }
+
+        .status-badge.connected { color: var(--green); border-color: var(--green); }
+        .status-badge.error { color: var(--red); border-color: var(--red); }
+
+        .main-area {
+            flex: 1;
+            width: 100%;
+            max-width: 720px;
+            padding: 0 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            min-height: 300px;
+            max-height: 60vh;
+        }
+
+        .msg {
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            max-width: 85%;
+            line-height: 1.5;
+            font-size: 0.95rem;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .msg.user {
+            background: var(--accent);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .msg.assistant {
+            background: var(--surface2);
+            color: var(--text);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .msg.system {
+            background: transparent;
+            color: var(--text-dim);
+            align-self: center;
+            font-size: 0.8rem;
+            padding: 0.25rem 0.75rem;
+        }
+
+        .msg .lang-tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.15);
+            margin-left: 0.5rem;
+            vertical-align: middle;
+        }
+
+        .msg.assistant .lang-tag {
+            background: var(--border);
+        }
+
+        .code-switch {
+            border-bottom: 2px dotted var(--orange);
+            cursor: help;
+        }
+
+        /* ── Mic button area ── */
+        .controls {
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .mic-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 2rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .mic-btn:hover { border-color: var(--accent); background: var(--surface2); }
+
+        .mic-btn.recording {
+            border-color: var(--red);
+            background: rgba(248, 113, 113, 0.15);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .mic-btn.processing {
+            border-color: var(--orange);
+            background: rgba(251, 146, 60, 0.15);
+            cursor: wait;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.4); }
+            50% { box-shadow: 0 0 0 15px rgba(248, 113, 113, 0); }
+        }
+
+        .mic-label {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        .state-indicator {
+            font-size: 0.85rem;
+            padding: 0.3rem 1rem;
+            border-radius: 8px;
+            background: var(--surface2);
+            color: var(--text-dim);
+            min-width: 160px;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .state-indicator.listening { color: var(--red); background: rgba(248,113,113,0.1); }
+        .state-indicator.thinking { color: var(--orange); background: rgba(251,146,60,0.1); }
+        .state-indicator.speaking { color: var(--green); background: rgba(74,222,128,0.1); }
+
+        /* ── Visualizer ── */
+        .visualizer {
+            width: 200px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+
+        .visualizer .bar {
+            width: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.05s ease;
+            height: 4px;
+        }
+
+        .visualizer.active .bar { animation: visualize 0.5s ease-in-out infinite alternate; }
+        .visualizer.active .bar:nth-child(1) { animation-delay: 0.0s; }
+        .visualizer.active .bar:nth-child(2) { animation-delay: 0.1s; }
+        .visualizer.active .bar:nth-child(3) { animation-delay: 0.2s; }
+        .visualizer.active .bar:nth-child(4) { animation-delay: 0.3s; }
+        .visualizer.active .bar:nth-child(5) { animation-delay: 0.4s; }
+        .visualizer.active .bar:nth-child(6) { animation-delay: 0.1s; }
+        .visualizer.active .bar:nth-child(7) { animation-delay: 0.3s; }
+        .visualizer.active .bar:nth-child(8) { animation-delay: 0.2s; }
+
+        @keyframes visualize {
+            from { height: 4px; }
+            to { height: 35px; }
+        }
+
+        /* ── Footer ── */
+        footer {
+            padding: 1rem;
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+        }
+
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>वाणी · Vani</h1>
+        <p>Voice↔Text↔Action middleware for Indian languages</p>
+    </header>
+
+    <div class="config-bar">
+        <select id="langSelect">
+            <option value="hi-IN">Hindi (हिन्दी)</option>
+            <option value="te-IN">Telugu (తెలుగు)</option>
+            <option value="ta-IN">Tamil (தமிழ்)</option>
+            <option value="bn-IN">Bengali (বাংলা)</option>
+            <option value="mr-IN">Marathi (मराठी)</option>
+            <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
+            <option value="ml-IN">Malayalam (മലയാളം)</option>
+            <option value="gu-IN">Gujarati (ગુજરાતી)</option>
+            <option value="en-IN">English (India)</option>
+        </select>
+        <span id="statusBadge" class="status-badge">Connecting…</span>
+    </div>
+
+    <div class="main-area">
+        <div id="chatLog" class="chat-log">
+            <div class="msg system">Press the mic and speak in your language</div>
+        </div>
+
+        <div class="controls">
+            <div id="stateIndicator" class="state-indicator">Ready</div>
+            <div id="visualizer" class="visualizer">
+                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                <div class="bar"></div><div class="bar"></div>
+            </div>
+            <button id="micBtn" class="mic-btn" disabled>🎙️</button>
+            <div class="mic-label">Hold to speak · Release to send</div>
+        </div>
+    </div>
+
+    <footer>
+        VAM/1.0 Protocol · Powered by <a href="https://www.sarvam.ai" target="_blank">Sarvam AI</a>
+        · <a href="https://github.com/santhoshkumarampolu/vani" target="_blank">GitHub</a>
+    </footer>
+
+    <script>
+    (() => {
+        // ── DOM ──
+        const chatLog = document.getElementById('chatLog');
+        const micBtn = document.getElementById('micBtn');
+        const langSelect = document.getElementById('langSelect');
+        const statusBadge = document.getElementById('statusBadge');
+        const stateIndicator = document.getElementById('stateIndicator');
+        const visualizer = document.getElementById('visualizer');
+
+        // ── State ──
+        let ws = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let processor = null;
+        let isRecording = false;
+        let isProcessing = false;
+
+        // ── Audio playback ──
+        const ttsChunks = [];
+        let playbackCtx = null;
+
+        // ── WebSocket ──
+        function connect() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/ws/audio`);
+
+            ws.onopen = () => {
+                // Send config
+                ws.send(JSON.stringify({
+                    type: 'config',
+                    language: langSelect.value,
+                }));
+            };
+
+            ws.onmessage = (evt) => {
+                const msg = JSON.parse(evt.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                statusBadge.textContent = 'Disconnected';
+                statusBadge.className = 'status-badge error';
+                micBtn.disabled = true;
+                // Reconnect after 2s
+                setTimeout(connect, 2000);
+            };
+
+            ws.onerror = () => {
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'status-badge error';
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'ready':
+                    statusBadge.textContent = `Connected · ${msg.session_id}`;
+                    statusBadge.className = 'status-badge connected';
+                    micBtn.disabled = false;
+                    break;
+
+                case 'turn_signal':
+                    updateState(msg.state);
+                    break;
+
+                case 'transcript':
+                    handleTranscript(msg);
+                    break;
+
+                case 'tts_audio':
+                    ttsChunks.push(msg.data);
+                    break;
+
+                case 'llm_text':
+                    addMessage('assistant', msg.text);
+                    break;
+
+                case 'turn_complete':
+                    isProcessing = false;
+                    micBtn.className = 'mic-btn';
+                    // Play collected TTS audio
+                    if (ttsChunks.length > 0) {
+                        playTTS(ttsChunks.splice(0));
+                    }
+                    break;
+
+                case 'error':
+                    addMessage('system', `⚠️ ${msg.message}`);
+                    isProcessing = false;
+                    micBtn.className = 'mic-btn';
+                    break;
+
+                case 'reset_ack':
+                    addMessage('system', 'Conversation reset');
+                    break;
+            }
+        }
+
+        function updateState(state) {
+            const labels = {
+                'LISTENING': '🎙 Listening…',
+                'THINKING': '🧠 Thinking…',
+                'SPEAKING': '🔊 Speaking…',
+                'END_OF_TURN': '✅ Done',
+                'IDLE': '💤 Ready',
+                'ERROR': '❌ Error',
+            };
+            stateIndicator.textContent = labels[state] || state;
+            stateIndicator.className = 'state-indicator ' + state.toLowerCase();
+        }
+
+        function handleTranscript(msg) {
+            if (!msg.is_final) return; // Only show final transcripts
+
+            let text = msg.text;
+
+            // Highlight code-switch spans
+            if (msg.code_switch_spans && msg.code_switch_spans.length > 0) {
+                const chars = [...text]; // Proper Unicode handling
+                const spans = [...msg.code_switch_spans].sort((a, b) => b.start - a.start);
+                for (const s of spans) {
+                    const switched = chars.slice(s.start, s.end).join('');
+                    const replacement = `<span class="code-switch" title="${s.language}">${switched}</span>`;
+                    chars.splice(s.start, s.end - s.start, replacement);
+                }
+                text = chars.join('');
+            }
+
+            const langTag = msg.language ? `<span class="lang-tag">${msg.language}</span>` : '';
+            addMessage('user', text + langTag, true);
+        }
+
+        // ── Chat log ──
+        function addMessage(role, content, isHtml = false) {
+            const div = document.createElement('div');
+            div.className = `msg ${role}`;
+            if (isHtml) {
+                div.innerHTML = content;
+            } else {
+                div.textContent = content;
+            }
+            chatLog.appendChild(div);
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        // ── TTS Playback ──
+        async function playTTS(chunks) {
+            try {
+                // Concatenate all base64 chunks into one PCM buffer
+                const allBytes = [];
+                for (const b64 of chunks) {
+                    const binary = atob(b64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        bytes[i] = binary.charCodeAt(i);
+                    }
+                    allBytes.push(bytes);
+                }
+
+                const totalLen = allBytes.reduce((sum, b) => sum + b.length, 0);
+                const pcmData = new Uint8Array(totalLen);
+                let offset = 0;
+                for (const b of allBytes) {
+                    pcmData.set(b, offset);
+                    offset += b.length;
+                }
+
+                // Convert 16-bit PCM to Float32 for Web Audio API
+                const int16 = new Int16Array(pcmData.buffer);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768.0;
+                }
+
+                if (!playbackCtx) {
+                    playbackCtx = new AudioContext({ sampleRate: 22050 });
+                }
+
+                const audioBuffer = playbackCtx.createBuffer(1, float32.length, 22050);
+                audioBuffer.getChannelData(0).set(float32);
+
+                const source = playbackCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(playbackCtx.destination);
+                source.start();
+
+                // Show assistant message (we don't have the text separately, but the
+                // LLM response was spoken — show a note)
+                source.onended = () => {
+                    updateState('IDLE');
+                };
+
+            } catch (e) {
+                console.error('TTS playback error:', e);
+            }
+        }
+
+        // ── Mic Recording ──
+        async function startRecording() {
+            if (isProcessing) return;
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                    }
+                });
+            } catch (e) {
+                addMessage('system', '⚠️ Microphone access denied');
+                return;
+            }
+
+            audioContext = new AudioContext({ sampleRate: 16000 });
+            const source = audioContext.createMediaStreamSource(mediaStream);
+
+            // Use ScriptProcessorNode for simplicity (AudioWorklet would be better for prod)
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            processor.onaudioprocess = (e) => {
+                if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                const float32 = e.inputBuffer.getChannelData(0);
+                // Convert Float32 → Int16 PCM
+                const int16 = new Int16Array(float32.length);
+                for (let i = 0; i < float32.length; i++) {
+                    const s = Math.max(-1, Math.min(1, float32[i]));
+                    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                // Send as base64 JSON
+                const bytes = new Uint8Array(int16.buffer);
+                const b64 = btoa(String.fromCharCode(...bytes));
+                ws.send(JSON.stringify({ type: 'audio_chunk', data: b64 }));
+            };
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+            isRecording = true;
+            micBtn.className = 'mic-btn recording';
+            visualizer.className = 'visualizer active';
+
+            // Tell server we're starting a turn
+            ws.send(JSON.stringify({ type: 'start_turn' }));
+        }
+
+        function stopRecording() {
+            if (!isRecording) return;
+
+            isRecording = false;
+            isProcessing = true;
+            micBtn.className = 'mic-btn processing';
+            visualizer.className = 'visualizer';
+
+            // Signal end of audio
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'end_audio' }));
+            }
+
+            // Clean up mic
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
+        }
+
+        // ── Event Listeners ──
+
+        // Hold-to-talk
+        micBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
+        micBtn.addEventListener('mouseup', () => stopRecording());
+        micBtn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
+
+        // Touch support
+        micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+        micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+
+        // Language change → reconnect
+        langSelect.addEventListener('change', () => {
+            if (ws) ws.close();
+            chatLog.innerHTML = '<div class="msg system">Language changed — reconnecting…</div>';
+        });
+
+        // Keyboard shortcut: Space to toggle
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !e.repeat && e.target === document.body) {
+                e.preventDefault();
+                startRecording();
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space' && e.target === document.body) {
+                e.preventDefault();
+                stopRecording();
+            }
+        });
+
+        // ── Init ──
+        connect();
+    })();
+    </script>
+</body>
+</html>

@@ -60,6 +60,7 @@ class GatewayEvent:
     transcript: TranscriptResult | None = None
     turn_signal: TurnSignal | None = None
     synthesis_chunk: SynthesisResult | None = None
+    llm_text: str | None = None
     error: str | None = None
 
 
@@ -216,6 +217,9 @@ class VaniGatewayStub:
             return
 
         self._history.append({"role": "assistant", "content": full_response_text})
+
+        # Emit LLM text so clients can display the assistant's response
+        yield GatewayEvent(llm_text=full_response_text)
 
         # ── SPEAKING ─────────────────────────────────────────────────────────
         yield GatewayEvent(turn_signal=self._transition(TurnState.SPEAKING))

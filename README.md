@@ -105,6 +105,32 @@ asyncio.run(main())
 
 ---
 
+## Try it in the Browser
+
+Want to test the full STT → LLM → TTS pipeline before writing any code? Vani ships with a **web demo** that runs entirely in your browser:
+
+```bash
+git clone https://github.com/santhoshkumarampolu/vani
+cd vani
+pip install -e ".[sarvam]" fastapi uvicorn
+
+export SARVAM_API_KEY=your-key-here
+python webapp/server.py
+# Open http://localhost:8000
+```
+
+**Hold the mic button** (or press spacebar), speak in any supported Indian language, and release. You'll see:
+
+1. 🎙 **Live transcription** of your speech
+2. 🧠 **LLM response** generated in the same language
+3. 🔊 **TTS playback** of the assistant's reply
+
+The web demo uses the same `VaniGatewayStub` pipeline as a production integration — it's a real end-to-end test of the protocol.
+
+> **Languages supported**: Hindi, Telugu, Tamil, Bengali, Marathi, Kannada, Malayalam, Gujarati, English (India)
+
+---
+
 ## Language Support
 
 | Language  | BCP-47   | Tier | Code-Switch Profile | Sarvam | AI4Bharat | Bhashini |
@@ -251,6 +277,13 @@ Pre-specified MCP tool schemas for Indian services (see [`spec/IndiaToolRegistry
 ## Examples
 
 ```bash
+# 🌐 Web demo — test in the browser (no mic code needed)
+SARVAM_API_KEY=sk-... python webapp/server.py
+# → Open http://localhost:8000
+
+# 🎤 CLI demo — terminal-based mic + Rich UI
+SARVAM_API_KEY=sk-... python demo/live_cli.py
+
 # Hinglish customer support agent
 SARVAM_API_KEY=sk-... python examples/hinglish_support_agent.py
 
