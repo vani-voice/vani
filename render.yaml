@@ -2,7 +2,6 @@ services:
   - type: web
     name: vani-demo
     runtime: python
-    region: singapore  # closest to India
     plan: free
     buildCommand: |
       pip install -r webapp/requirements.txt
