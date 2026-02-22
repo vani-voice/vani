@@ -11,4 +11,4 @@ services:
       - key: SARVAM_API_KEY
         sync: false  # set manually in Render dashboard
       - key: PYTHON_VERSION
-        value: "3.12"
+        value: "3.12.8"
