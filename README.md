@@ -380,5 +380,4 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-_वाणी — Sanskrit for speech, voice, the goddess of language._  
-_Built with ❤️ for Bharat._
+_Vani — voice middleware, built for Bharat._
