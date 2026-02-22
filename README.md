@@ -110,7 +110,7 @@ asyncio.run(main())
 Want to test the full STT → LLM → TTS pipeline before writing any code? Vani ships with a **web demo** that runs entirely in your browser:
 
 ```bash
-git clone https://github.com/santhoshkumarampolu/vani
+git clone https://github.com/vani-voice/vani
 cd vani
 pip install -e ".[sarvam]" fastapi uvicorn
 
@@ -328,7 +328,7 @@ config.data_residency = DataResidency.ANY   # Not recommended
 ## Development
 
 ```bash
-git clone https://github.com/santhoshkumarampolu/vani
+git clone https://github.com/vani-voice/vani
 cd vani
 pip install -e ".[dev]"
 

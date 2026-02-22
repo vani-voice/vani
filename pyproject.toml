@@ -59,11 +59,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/santhoshkumarampolu/vani"
-Documentation = "https://github.com/santhoshkumarampolu/vani#readme"
-Repository = "https://github.com/santhoshkumarampolu/vani"
-"Bug Tracker" = "https://github.com/santhoshkumarampolu/vani/issues"
-Changelog = "https://github.com/santhoshkumarampolu/vani/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/vani-voice/vani"
+Documentation = "https://github.com/vani-voice/vani#readme"
+Repository = "https://github.com/vani-voice/vani"
+"Bug Tracker" = "https://github.com/vani-voice/vani/issues"
+Changelog = "https://github.com/vani-voice/vani/blob/main/CHANGELOG.md"
 
 [project.scripts]
 vani-gen = "vani.cli:generate_protos"
