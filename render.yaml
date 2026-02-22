@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: vani-demo
+    runtime: python
+    region: singapore  # closest to India
+    plan: free
+    buildCommand: |
+      pip install -r webapp/requirements.txt
+      pip install -e .
+    startCommand: uvicorn webapp.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SARVAM_API_KEY
+        sync: false  # set manually in Render dashboard
+      - key: PYTHON_VERSION
+        value: "3.12"

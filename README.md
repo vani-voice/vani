@@ -107,7 +107,15 @@ asyncio.run(main())
 
 ## Try it in the Browser
 
-Want to test the full STT → LLM → TTS pipeline before writing any code? Vani ships with a **web demo** that runs entirely in your browser:
+Want to test the full STT → LLM → TTS pipeline before writing any code? Vani ships with a **web demo** you can try instantly.
+
+### One-click deploy
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vani-voice/vani)
+
+> You'll be asked for a `SARVAM_API_KEY` — get one free at [sarvam.ai](https://www.sarvam.ai).
+
+### Or run locally
 
 ```bash
 git clone https://github.com/vani-voice/vani
