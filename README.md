@@ -1,4 +1,4 @@
-# वाणी · Vani
+# Vani
 
 **The WebRTC for Indian AI Agents.**
 
