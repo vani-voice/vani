@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vani"
-version = "0.1.0-alpha"
+version = "0.1.0a1"
 description = "Vani — Open-source Voice↔Text↔Action middleware protocol for Indian languages"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -64,10 +64,6 @@ Documentation = "https://github.com/vani-voice/vani#readme"
 Repository = "https://github.com/vani-voice/vani"
 "Bug Tracker" = "https://github.com/vani-voice/vani/issues"
 Changelog = "https://github.com/vani-voice/vani/blob/main/CHANGELOG.md"
-
-[project.scripts]
-vani-gen = "vani.cli:generate_protos"
-vani-conformance = "vani.cli:run_conformance"
 
 [tool.hatch.build.targets.wheel]
 packages = ["vani"]

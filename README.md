@@ -3,6 +3,7 @@
 **The WebRTC for Indian AI Agents.**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/vani?color=green)](https://pypi.org/project/vani/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![Protocol](https://img.shields.io/badge/protocol-VAM%2F1.0-orange)](spec/VAM-Overview.md)
 [![Status](https://img.shields.io/badge/status-alpha-yellow)](CHANGELOG.md)
