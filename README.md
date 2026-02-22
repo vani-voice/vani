@@ -371,7 +371,7 @@ python -m grpc_tools.protoc -I proto \
 
 ## Contributing
 
-Contributions welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) (coming soon) and open an issue before submitting large PRs.
+Contributions welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and open an issue before submitting large PRs.
 
 Priority areas:
 
